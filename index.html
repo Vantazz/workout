@@ -187,13 +187,15 @@
 (function(){
 "use strict";
 
+/* Names only. Every weight lives in this browser's localStorage and is never
+   part of the source, so nothing about your lifts is in the published file. */
 var EX = [
-  {id:"chest",    name:"Chest press",   start:37.5},
-  {id:"legpress", name:"Leg press",     start:90},
-  {id:"lowrow",   name:"Low row",       start:45},
-  {id:"legcurl",  name:"Leg curl",      start:37.5},
-  {id:"latpull",  name:"Lat pulldown",  start:40},
-  {id:"shoulder", name:"Shoulder press",start:17.5}
+  {id:"chest",    name:"Chest press"},
+  {id:"legpress", name:"Leg press"},
+  {id:"lowrow",   name:"Low row"},
+  {id:"legcurl",  name:"Leg curl"},
+  {id:"latpull",  name:"Lat pulldown"},
+  {id:"shoulder", name:"Shoulder press"}
 ];
 var SETS = 3, STEP = 2.5, REST = 90, KEY = "fullbody-v1";
 
@@ -222,7 +224,8 @@ var live = null, idx = 0, timer = null, tick = 0;
 
 function $(id){ return document.getElementById(id); }
 function save(){ store.write(db); }
-function fmt(n){ return (Math.round(n*10)/10).toString().replace(/\.0$/,""); }
+function set(n){ return typeof n === "number" && isFinite(n); }
+function fmt(n){ return set(n) ? (Math.round(n*10)/10).toString().replace(/\.0$/,"") : "—"; }
 function dayName(iso){
   var d = new Date(iso), t = new Date(), diff = Math.round((new Date(t.getFullYear(),t.getMonth(),t.getDate()) - new Date(d.getFullYear(),d.getMonth(),d.getDate()))/86400000);
   if(diff===0) return "today"; if(diff===1) return "yesterday"; if(diff>1 && diff<7) return diff+" days ago";
@@ -238,7 +241,8 @@ function drawHome(){
   var ul = $("homeList"); ul.innerHTML = "";
   EX.forEach(function(e,i){
     var li = document.createElement("li");
-    li.innerHTML = '<span class="seq">'+(i+1)+'</span><span class="nm"></span><span class="kg">'+fmt(db.weights[e.id])+'<span>kg</span></span>';
+    var w = db.weights[e.id];
+    li.innerHTML = '<span class="seq">'+(i+1)+'</span><span class="nm"></span><span class="kg">'+fmt(w)+(set(w) ? '<span>kg</span>' : '')+'</span>';
     li.querySelector(".nm").textContent = e.name;
     ul.appendChild(li);
   });
@@ -255,7 +259,9 @@ function begin(){
   live.entries = live.entries || {};
   EX.forEach(function(e){
     var en = live.entries[e.id];
-    if (!en || typeof en.w !== "number") live.entries[e.id] = {w:db.weights[e.id], sets:(en && en.sets) || 0, touched:false};
+    if (!en || typeof en !== "object") en = live.entries[e.id] = {sets:0, touched:false};
+    if (typeof en.sets !== "number") en.sets = 0;
+    if (!set(en.w) && set(db.weights[e.id])) en.w = db.weights[e.id];
   });
   save();
   drawSet(); show("set");
@@ -271,11 +277,12 @@ function drawSet(){
   var e = EX[idx], entry = cur();
   $("stepLabel").textContent = "Exercise "+(idx+1)+" of "+EX.length;
   $("exName").textContent = e.name;
-  $("numWrap").innerHTML = '<b id="wVal">'+fmt(entry.w)+'</b><em>kg</em>';
+  $("numWrap").innerHTML = '<b id="wVal">'+fmt(entry.w)+'</b><em>'+(set(entry.w) ? 'kg' : 'tap to set')+'</em>';
 
   var prev = history(e.id);
   var p = prev[prev.length-1];
-  $("exLast").textContent = p ? "Last time "+fmt(p.w)+" kg · "+dayName(p.date) : "First time on this machine";
+  $("exLast").textContent = p ? "Last time "+fmt(p.w)+" kg · "+dayName(p.date)
+    : (set(entry.w) ? "First time on this machine" : "Set your working weight to start");
 
   var bars = $("bars"); bars.innerHTML = "";
   EX.forEach(function(_,i){
@@ -302,6 +309,7 @@ function drawSet(){
 function hitSet(n){
   cancelEdit();
   var entry = cur();
+  if (!set(entry.w)){ $("rest").textContent = "Set the weight first"; return; }
   entry.sets = (entry.sets === n+1) ? n : n+1;
   live.at = idx; save(); drawSet();
   if (entry.sets === n+1 && entry.sets < SETS) startRest();
@@ -310,9 +318,11 @@ function hitSet(n){
 function nudge(dir){
   cancelEdit();
   var entry = cur();
-  entry.w = Math.max(0, Math.round((entry.w + dir*STEP)*10)/10);
+  var base = set(entry.w) ? entry.w : 0;
+  entry.w = Math.max(0, Math.round((base + dir*STEP)*10)/10);
   entry.touched = true;
   $("wVal").textContent = fmt(entry.w);
+  $("numWrap").querySelector("em").textContent = "kg";
   live.at = idx; save();
 }
 
@@ -322,7 +332,8 @@ function editWeight(){
   var entry = cur();
   wrap.innerHTML = "";
   var inp = document.createElement("input");
-  inp.type = "number"; inp.inputMode = "decimal"; inp.step = "0.5"; inp.value = fmt(entry.w);
+  inp.type = "number"; inp.inputMode = "decimal"; inp.step = "0.5";
+  inp.value = set(entry.w) ? fmt(entry.w) : ""; inp.placeholder = "kg";
   wrap.appendChild(inp);
   inp.focus(); inp.select();
   inp.onblur = function(){ commitWeight(inp); };
@@ -335,7 +346,8 @@ function commitWeight(inp){
     v = Math.round(v*10)/10;
     if (v !== entry.w){ entry.w = v; entry.touched = true; }
   }
-  $("numWrap").innerHTML = '<b id="wVal">'+fmt(entry ? entry.w : 0)+'</b><em>kg</em>';
+  var w = entry ? entry.w : null;
+  $("numWrap").innerHTML = '<b id="wVal">'+fmt(w)+'</b><em>'+(set(w) ? 'kg' : 'tap to set')+'</em>';
   if (live){ live.at = idx; save(); }
 }
 
@@ -392,7 +404,7 @@ function finish(){
       rec.entries[e.id] = {w:en.w, sets:en.sets};
       db.weights[e.id] = en.w;          /* carry the working weight forward */
       any = true; sets += en.sets;
-    } else if (en.touched){
+    } else if (en.touched && set(en.w)){
       db.weights[e.id] = en.w;          /* dialled it in but skipped it: keep the number */
     }
   });
@@ -547,7 +559,6 @@ document.addEventListener("keydown", function(ev){
 store.read().then(function(saved){
   if (saved){ db = saved; }
   db.weights = db.weights || {}; db.sessions = db.sessions || [];
-  EX.forEach(function(e){ if (typeof db.weights[e.id] !== "number") db.weights[e.id] = e.start; });
   drawHome();
 });
 })();
