@@ -190,14 +190,16 @@
 /* Names only. Every weight lives in this browser's localStorage and is never
    part of the source, so nothing about your lifts is in the published file. */
 var EX = [
-  {id:"chest",    name:"Chest press"},
-  {id:"legpress", name:"Leg press"},
+  {id:"chest",    name:"Chest press",    rest:90},
+  {id:"legpress", name:"Leg press",    rest:90},
   {id:"lowrow",   name:"Low row"},
   {id:"legcurl",  name:"Leg curl"},
   {id:"latpull",  name:"Lat pulldown"},
-  {id:"shoulder", name:"Shoulder press"}
+  {id:"shoulder", name:"Shoulder press", rest:90}
 ];
-var SETS = 3, STEP = 2.5, REST = 90, KEY = "fullbody-v1";
+/* Presses get the long rest; everything else recovers on REST. */
+var SETS = 3, STEP = 2.5, REST = 60, KEY = "fullbody-v1";
+function restFor(i){ return EX[i].rest || REST; }
 
 /* ---------- storage: sandbox API if present, otherwise the browser ---------- */
 var store = {
@@ -220,7 +222,7 @@ var saveFailed = false;
 function warn(){ if(!saveFailed){ saveFailed = true; $("homeNote").textContent = "This browser is blocking storage, so nothing will be kept after you close the page."; } }
 
 var db = {weights:{}, sessions:[], draft:null};
-var live = null, idx = 0, timer = null, tick = 0;
+var live = null, idx = 0, timer = null;
 
 function $(id){ return document.getElementById(id); }
 function save(){ store.write(db); }
@@ -303,16 +305,18 @@ function drawSet(){
   }
   $("btnNext").textContent = idx === EX.length-1 ? "Finish workout" : "Next";
   $("btnPrev").disabled = idx === 0;
-  stopRest();
+  syncRest();
 }
 
 function hitSet(n){
   cancelEdit();
   var entry = cur();
   if (!set(entry.w)){ $("rest").textContent = "Set the weight first"; return; }
-  entry.sets = (entry.sets === n+1) ? n : n+1;
+  var ticked = entry.sets !== n+1;
+  entry.sets = ticked ? n+1 : n;
+  if (!ticked) clearRest();
   live.at = idx; save(); drawSet();
-  if (entry.sets === n+1 && entry.sets < SETS) startRest();
+  if (ticked && entry.sets < SETS) startRest();
 }
 
 function nudge(dir){
@@ -359,16 +363,35 @@ function cancelEdit(){
   commitWeight(inp);
 }
 
-function startRest(){
-  stopRest(); tick = REST;
-  $("rest").textContent = "Rest " + tick + "s";
-  timer = setInterval(function(){
-    tick--;
-    $("rest").textContent = tick > 0 ? "Rest " + tick + "s" : "Go";
-    if (tick <= 0) { clearInterval(timer); timer = null; }
-  }, 1000);
+/* The countdown is a deadline in epoch ms kept with the draft, not a tick count,
+   so backgrounding the app, locking the phone or reopening the page all land on
+   the same remaining seconds instead of a frozen clock. */
+function restLeft(){
+  if (!live || !live.restEnd || live.restAt !== idx) return null;
+  return Math.ceil((live.restEnd - Date.now())/1000);
 }
-function stopRest(){ if(timer) clearInterval(timer); timer = null; $("rest").textContent = ""; }
+function paintRest(){
+  var left = restLeft();
+  if (left === null){ $("rest").textContent = ""; return false; }
+  $("rest").textContent = left > 0 ? "Rest " + left + "s" : "Go";
+  return left > 0;
+}
+function startRest(){
+  live.restEnd = Date.now() + restFor(idx)*1000;
+  live.restAt = idx;
+  save();
+  runRest();
+}
+/* Resume whatever the draft says is still running for this exercise. */
+function syncRest(){ stopTick(); if (restLeft() !== null) runRest(); else $("rest").textContent = ""; }
+function runRest(){
+  stopTick();
+  if (!paintRest()) return;
+  timer = setInterval(function(){ if (!paintRest()) stopTick(); }, 250);
+}
+function stopTick(){ if(timer) clearInterval(timer); timer = null; }
+function clearRest(){ if (live){ live.restEnd = null; live.restAt = null; } }
+function stopRest(){ stopTick(); clearRest(); $("rest").textContent = ""; }
 
 function next(){
   cancelEdit(); stopRest();
@@ -523,6 +546,11 @@ $("numWrap").onclick   = editWeight;
 $("shYes").onclick     = function(){ var cb = sheetYes; closeSheet(); if (cb) cb(); };
 $("shNo").onclick      = closeSheet;
 $("veil").onclick      = function(ev){ if (ev.target === $("veil")) closeSheet(); };
+/* Coming back from the background: repaint from the clock at once. */
+document.addEventListener("visibilitychange", function(){
+  if (!document.hidden && $("v-set").classList.contains("on")) syncRest();
+});
+window.addEventListener("focus", function(){ if ($("v-set").classList.contains("on")) syncRest(); });
 window.addEventListener("resize", function(){ if($("v-chart").classList.contains("on")) drawChart(); });
 
 /* keyboard: arrows walk the workout, 1-3 tick sets */
