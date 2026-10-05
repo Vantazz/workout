@@ -258,6 +258,7 @@ function drawHome(){
 function begin(){
   if (db.draft){ live = db.draft; idx = Math.min(Math.max(live.at || 0, 0), EX.length-1); }
   else { live = {date:new Date().toISOString(), at:0, entries:{}}; idx = 0; db.draft = live; }
+  live.paused = false;
   live.entries = live.entries || {};
   EX.forEach(function(e){
     var en = live.entries[e.id];
@@ -534,7 +535,7 @@ $("btnDrop").onclick   = function(){
   });
 };
 $("btnQuit").onclick   = function(){
-  cancelEdit(); stopRest(); live.at = idx; save(); drawHome(); show("home");
+  cancelEdit(); stopRest(); live.at = idx; live.paused = true; save(); drawHome(); show("home");
   $("homeNote").textContent = "Workout paused at " + EX[idx].name + ". Resume any time.";
 };
 $("btnEnd").onclick    = askFinish;
@@ -588,6 +589,9 @@ store.read().then(function(saved){
   if (saved){ db = saved; }
   db.weights = db.weights || {}; db.sessions = db.sessions || [];
   drawHome();
+  /* Closed mid-workout rather than paused: drop straight back in, and the rest
+     deadline picks up wherever the clock says it is now. */
+  if (db.draft && !db.draft.paused) begin();
 });
 })();
 </script>
